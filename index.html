@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>ASCII Road (12 FPS, Car Overlays Above + Solid Color Box)</title>
+    <style>
+        /* Basic black bg, white monospace text, pinned to viewport */
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            color: #fff;
+            font-family: monospace;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            overflow: hidden;
+            /* no scrollbars */
+        }
+
+        /* Container for <pre> plus overlays */
+        #asciiContainer {
+            position: relative;
+            /* so absolute children stack above the <pre> */
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+
+        /* The ASCII text area */
+        #asciiCanvas {
+            position: relative;
+            z-index: 1;
+            /* lower z-index so overlays can be on top */
+            margin: 0;
+            padding: 0.5em;
+            line-height: 1.1;
+            font-size: 14px;
+            white-space: pre;
+        }
+
+        /* The bounding box overlay (now a visible, solid/semi‐transparent color) */
+        .carOverlay {
+            position: absolute;
+            z-index: 9999;
+            /* above #asciiCanvas */
+            background: rgba(255, 0, 0, 0.0);
+            /* semi-trans red for debugging; change as needed */
+            pointer-events: auto;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        /* The car ASCII text itself is blue, purely visual, no link. */
+        .carBlue {
+            color: #00f;
+            /* link-blue styling */
+        }
+    </style>
+</head>
+
+<body>
+    <div id="asciiContainer">
+        <pre id="asciiCanvas"></pre>
+
+        <!-- Two bounding boxes for the cars, now visible with a red background -->
+        <a href="https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcQGsbZ-0Itn_O_LmY4H33OMyltx6BsBIJvv5n-5bxgrLPoBc4uMQdP_gpn8254EKb9Mb_DBWofsxRvjKUtcEcHgtQ"
+            target="_blank" rel="noopener noreferrer" id="car1Overlay" class="carOverlay">
+        </a>
+
+        <a href="https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcQGsbZ-0Itn_O_LmY4H33OMyltx6BsBIJvv5n-5bxgrLPoBc4uMQdP_gpn8254EKb9Mb_DBWofsxRvjKUtcEcHgtQ"
+            target="_blank" rel="noopener noreferrer" id="car2Overlay" class="carOverlay">
+        </a>
+    </div>
+
+    <script>
+        /***************************************************************
+         * ASCII Road (12 FPS)
+         * Car2 speed=0.9
+         * Cars in blue text, bounding box moved UP by 1 car height.
+        ***************************************************************/
+
+        let COLS = 80;
+        let ROWS = 25;
+
+        function updateCanvasSize() {
+            const asciiCanvas = document.getElementById('asciiCanvas');
+
+            // measure one char
+            const measure = document.createElement('span');
+            measure.textContent = 'X';
+            asciiCanvas.appendChild(measure);
+            const cw = measure.getBoundingClientRect().width;
+            const ch = measure.getBoundingClientRect().height;
+            asciiCanvas.removeChild(measure);
+
+            const container = document.getElementById('asciiContainer');
+            const cW = container.clientWidth;
+            const cH = container.clientHeight;
+
+            COLS = Math.floor(cW / cw);
+            ROWS = Math.floor(cH / ch);
+
+            if (COLS < 40) COLS = 40;
+            if (ROWS < 15) ROWS = 15;
+        }
+
+        /** Mountains, cacti, tree, etc. */
+        const mountains = [
+            "          /\\",
+            "         /**\\",
+            "        /****\\   /\\",
+            "       /      \\ /**\\",
+            "      /  /\\    /    \\        /\\    /\\  /\\      /\\            /\\/\\/\\  /\\",
+            "     /  /  \\  /      \\      /  \\/\\/  \\/  \\  /\\/  \\/\\  /\\  /\\/ / /  \\/  \\",
+            "    /  /    \\/ /\\     \\    /    \\ \\  /    \\/ /   /  \\/  \\/  \\  /    \\   \\",
+            "   /  /      \\/  \\/\\   \\  /      \\    /   /    \\",
+            "__/__/_______/___/__\\___\\__________________________________________________"
+        ];
+
+        const cactus1 = [
+            "    ,*-.",
+            "    |  |",
+            ",.  |  |",
+            "| |_|  | ,.",
+            "`---.  |_| |",
+            "    |  .--`",
+            "    |  |",
+            "    |  |"
+        ];
+
+        const cactus2 = [
+            "     ,*-.",
+            "     |  |",
+            "  ,. |  |",
+            "  | |_|  | ,.",
+            "  `---.  |_| |",
+            "      |  .--`",
+            "      |  |",
+            "      |  |"
+        ];
+
+        const asciiTree = [
+            "             v .   ._, |_  .,",
+            "           `-._\\/  .  \\ /    |/_",
+            "               \\\\  _\\, y | \\//",
+            "         _\\_.___\\\\, \\/ -.\\||",
+            "           `7-,--.`._||  / / ,",
+            "           /'     `-. `./ / |/_.'",
+            "                     |    |//",
+            "                     |_    /",
+            "                     |-   |",
+            "                     |   =|",
+            "                     |    |"
+        ];
+
+        /** Car lines (blue text only, no link) */
+        const car1 = [
+            "    .--------.   ",
+            "___/ ___|_____\\____   ",
+            "*,   _   | -   _    O ",
+            "'--(_)_-------(_)--'  "
+        ];
+        const car2 = [
+            "   ___   \\____",
+            "  /_  ' __/   _|",
+            "  '(*)----(*)-'"
+        ];
+
+        // Car speeds
+        let xCar1 = -10;
+        let xCar2 = -40;
+        const car1Speed = 1.2;
+        const car2Speed = 0.8;
+
+        /** Return the bottom row for underscores. */
+        function roadRow() {
+            return ROWS - 1;
+        }
+
+        /** Escape text: space => &nbsp;, etc. */
+        function escapeHtml(ch) {
+            if (ch === ' ') return '&nbsp;';
+            switch (ch) {
+                case '<': return '&lt;';
+                case '>': return '&gt;';
+                case '&': return '&amp;';
+                default: return ch;
+            }
+        }
+
+        /** Overwrite only non-space with normal text. */
+        function stampNonSpace(dst, art, topRow, leftCol) {
+            for (let r = 0; r < art.length; r++) {
+                const line = art[r];
+                for (let c = 0; c < line.length; c++) {
+                    if (line[c] !== ' ') {
+                        const rr = topRow + r;
+                        const cc = leftCol + c;
+                        if (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS) {
+                            dst[rr][cc] = escapeHtml(line[c]);
+                        }
+                    }
+                }
+            }
+        }
+
+        /** Stamp the entire line in .carBlue styling */
+        function stampCarBlue(dst, art, topRow, leftCol) {
+            for (let r = 0; r < art.length; r++) {
+                const line = art[r];
+                for (let c = 0; c < line.length; c++) {
+                    const rr = topRow + r;
+                    const cc = leftCol + c;
+                    if (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS) {
+                        const ch = line[c] || ' ';
+                        dst[rr][cc] = `<span class="carBlue">${escapeHtml(ch)}</span>`;
+                    }
+                }
+            }
+        }
+
+        /** Build the ASCII as a 2D array, then join. */
+        function buildFrame() {
+            // 2D array of &nbsp;
+            const rows = [];
+            for (let i = 0; i < ROWS; i++) {
+                rows[i] = new Array(COLS).fill('&nbsp;');
+            }
+
+            // Stamp mountains
+            const mh = mountains.length;
+            const mw = Math.max(...mountains.map(l => l.length));
+            const leftTop = roadRow() - (mh - 1);
+            const leftOff = -Math.floor(mw / 2);
+            stampNonSpace(rows, mountains, leftTop, leftOff);
+
+            // Right mountain
+            const rightEdge = COLS - 2;
+            const left2 = rightEdge - mw + 1;
+            stampNonSpace(rows, mountains, roadRow() - (mh - 1), left2);
+
+            // Road underscores
+            for (let col = 0; col < COLS; col++) {
+                rows[roadRow()][col] = '_';
+            }
+
+            // Cacti, tree
+            stampNonSpace(rows, cactus1, roadRow() - (cactus1.length - 1), Math.floor(0.25 * COLS));
+            stampNonSpace(rows, cactus2, roadRow() - (cactus2.length - 1), Math.floor(0.55 * COLS));
+            stampNonSpace(rows, asciiTree, roadRow() - (asciiTree.length - 1), Math.floor(0.35 * COLS));
+
+            // Cars in blue
+            const car1Top = roadRow() - (car1.length - 1);
+            stampCarBlue(rows, car1, car1Top, Math.floor(xCar1));
+
+            const car2Top = roadRow() - (car2.length - 1);
+            stampCarBlue(rows, car2, car2Top, Math.floor(xCar2));
+
+            // Convert rows to strings
+            return rows.map(r => r.join('')).join('\n');
+        }
+
+        function animate() {
+            updateCanvasSize();
+
+            const frame = buildFrame();
+            document.getElementById('asciiCanvas').innerHTML = frame;
+
+            // Move cars
+            xCar1 += car1Speed;
+            xCar2 += car2Speed;
+            if (xCar1 > COLS + 10) xCar1 = -30;
+            if (xCar2 > COLS + 10) xCar2 = -50;
+
+            // Position bounding boxes
+            positionCarOverlay('car1Overlay', car1, xCar1);
+            positionCarOverlay('car2Overlay', car2, xCar2);
+        }
+
+        /**
+         * Move the bounding box up by exactly one "car height" 
+         * so it ends up fully covering the top portion of the car 
+         * if previously it was too far below.
+         */
+        function positionCarOverlay(overlayId, carLines, xPos) {
+            const asciiCanvas = document.getElementById('asciiCanvas');
+            const rect = asciiCanvas.getBoundingClientRect();
+
+            // measure char
+            const measure = document.createElement('span');
+            measure.textContent = 'X';
+            asciiCanvas.appendChild(measure);
+            const cw = measure.getBoundingClientRect().width;
+            const ch = measure.getBoundingClientRect().height;
+            asciiCanvas.removeChild(measure);
+
+            let carWidth = 0;
+            for (const l of carLines) {
+                if (l.length > carWidth) carWidth = l.length;
+            }
+            const carHeight = carLines.length;
+
+            // ASCII coords
+            const topRow = roadRow() - (carHeight - 1);
+            const leftCol = Math.floor(xPos);
+
+            // Convert to pixel coords
+            const leftPx = rect.left + leftCol * cw - 20;
+            const topPx = rect.top + topRow * ch + 25;
+            const wPx = carWidth * cw + 25;
+            const hPx = carHeight * ch + 25;
+
+            // SHIFT the bounding box up by exactly its own height
+            const overlayTopPx = topPx - hPx;
+
+            const overlay = document.getElementById(overlayId);
+            overlay.style.left = leftPx + 'px';
+            overlay.style.top = overlayTopPx + 'px';
+            overlay.style.width = wPx + 'px';
+            overlay.style.height = hPx + 'px';
+            overlay.style.zIndex = 9999; // on top
+        }
+
+        // 12 FPS
+        setInterval(animate, 1000 / 24);
+    </script>
+</body>
+
+</html>
